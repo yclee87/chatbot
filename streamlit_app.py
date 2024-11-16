@@ -1,40 +1,66 @@
 import streamlit as st
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from openai import OpenAI
 
-# Load LLama 1B model and tokenizer
-@st.cache_resource
-def load_model():
-    model_name = "decapoda-research/llama-1b-hf"  # LLama 1B 모델 이름
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name)
-    return tokenizer, model
-
-# 모델 로드
-tokenizer, model = load_model()
-
-# Streamlit 앱 인터페이스
+# Show title and description.
 st.title("🌸 일본 문화 및 관광 전문가 챗봇")
 st.write(
     "이 챗봇은 일본 문화, 관광, 전통, 현대 생활에 대한 전문적인 정보를 제공합니다. "
-    "LLama 1B 모델을 활용하며, 일본에 대해 궁금한 모든 것을 물어보세요!"
+    "OpenAI의 GPT-4 모델을 활용하며, 일본에 대해 궁금한 모든 것을 물어보세요! "
+    "OpenAI API 키가 필요하며, [여기](https://platform.openai.com/account/api-keys)에서 발급받을 수 있습니다."
 )
 
-# 사용자 입력 받기
-user_input = st.text_input("일본에 대해 무엇이든 물어보세요!")
+# Ask user for their OpenAI API key via `st.text_input`.
+# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
+# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
+openai_api_key = st.text_input("OpenAI API Key", type="password")
+if not openai_api_key:
+    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
+else:
 
-if user_input:
-    # 입력 토큰화
-    input_ids = tokenizer.encode(user_input, return_tensors="pt")
+    # Create an OpenAI client.
+    client = OpenAI(api_key=openai_api_key)
 
-    # 모델로부터 응답 생성
-    with st.spinner("응답 생성 중..."):
-        outputs = model.generate(
-            input_ids, 
-            max_length=500,  # 최대 출력 길이
-            num_return_sequences=1,
-            temperature=0.7  # 출력의 다양성을 조정
+    # Create a session state variable to store the chat messages. This ensures that the
+    # messages persist across reruns.
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert in Japanese culture and tourism. Provide detailed "
+                    "and professional insights on topics related to Japan, including its "
+                    "traditional culture, modern society, travel destinations, cuisine, festivals, "
+                    "and history. Respond in a friendly and engaging manner."
+                ),
+            }
+        ]
+
+    # Display the existing chat messages via `st.chat_message`.
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Create a chat input field to allow the user to enter a message. This will display
+    # automatically at the bottom of the page.
+    if prompt := st.chat_input("일본에 대해 무엇이든 물어보세요!"):
+
+        # Store and display the current prompt.
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Generate a response using the OpenAI API.
+        stream = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": m["role"], "content": m["content"]}
+                for m in st.session_state.messages
+            ],
+            stream=True,
         )
-        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-    # 응답 출력
-    st.markdown(f"**챗봇:** {response}")
+        # Stream the response to the chat using `st.write_stream`, then store it in 
+        # session state.
+        with st.chat_message("assistant"):
+            response = st.write_stream(stream)
+        st.session_state.messages.append({"role": "assistant", "content": response})
